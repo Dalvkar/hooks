@@ -1,13 +1,14 @@
-"""HOOK 2 (Codex) · PreToolUse (Bash)
-Bloquea comandos peligrosos antes de que se ejecuten.
-Es idéntico al de Claude Code: ambos reciben el comando en tool_input.command.
+"""HOOK 2 (Codex) · PreToolUse + PermissionRequest (Bash)
+Bloquea comandos peligrosos antes de que se ejecuten o se apruebe su escalación.
+Ambos eventos reciben el comando en tool_input.command, pero cada uno requiere
+una forma JSON de denegación diferente.
 """
 import json
 import re
 import sys
 from pathlib import Path
-from pathlib import Path
 
+sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
 
 PELIGROSOS = {
@@ -20,21 +21,35 @@ PELIGROSOS = {
 }
 
 datos = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+evento = datos.get("hook_event_name", "PreToolUse")
 comando = datos.get("tool_input", {}).get("command", "")
 
 for patron, motivo in PELIGROSOS.items():
     if re.search(patron, comando, re.IGNORECASE):
-        print(
-            f"⛔ BLOQUEADO por hook: {motivo}.\nComando: {comando}\n"
-            "Si de verdad es necesario, pide al usuario que lo ejecute manualmente.",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+        razon = f"⛔ BLOQUEADO por hook: {motivo}. Comando: {comando}"
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "hooks"))
-from verificar_push import verificar_push
+        if evento == "PermissionRequest":
+            salida = {
+                "hookSpecificOutput": {
+                    "hookEventName": "PermissionRequest",
+                    "decision": {
+                        "behavior": "deny",
+                        "message": razon,
+                    },
+                }
+            }
+        else:
+            salida = {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": razon,
+                }
+            }
 
-verificar_push(comando)
+        print(json.dumps(salida, ensure_ascii=False))
+        sys.exit(0)
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "hooks"))
 from verificar_push import verificar_push
 
